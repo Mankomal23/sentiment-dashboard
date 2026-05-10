@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentiment Intelligence Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #07080d; --surface: #0e1018; --border: #1c1f2e;
+  --pos: #00e5a0; --neg: #ff4d6d; --neu: #7b93ff;
+  --text: #dde1f0; --muted: #4a506e; --font: 'DM Mono', monospace;
+}
+body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+header { padding: 1.5rem 2rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.logo { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 800; }
+.logo span { color: var(--pos); }
+.ws-status { font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase; display: flex; align-items: center; gap: 0.5rem; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.dot.live { background: var(--pos); box-shadow: 0 0 8px var(--pos); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.layout { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 57px); }
+.sidebar { border-right: 1px solid var(--border); padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.panel-title { font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem; }
+
+textarea {
+  width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  font-family: var(--font); font-size: 0.75rem; padding: 0.75rem; border-radius: 3px;
+  resize: vertical; min-height: 80px; outline: none; transition: border-color 0.2s;
+}
+textarea:focus { border-color: var(--pos); }
+
+.btn {
+  width: 100%; padding: 0.65rem; border: none; border-radius: 3px; font-family: var(--font);
+  font-size: 0.75rem; cursor: pointer; font-weight: 500; letter-spacing: 0.05em; transition: opacity 0.2s;
+}
+.btn:hover { opacity: 0.85; }
+.btn-primary { background: var(--pos); color: #000; }
+.btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+.stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0.75rem; text-align: center; }
+.stat-box .num { font-family: 'Syne', sans-serif; font-size: 1.4rem; font-weight: 800; }
+.stat-box .lbl { font-size: 0.55rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-top: 0.2rem; }
+.pos-color { color: var(--pos); }
+.neg-color { color: var(--neg); }
+.neu-color { color: var(--neu); }
+
+.chart-box { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 1rem; }
+canvas { max-height: 160px; }
+
+.main { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; overflow-y: auto; }
+.feed { display: flex; flex-direction: column; gap: 0.6rem; max-height: 100%; overflow-y: auto; }
+.feed-item {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 3px;
+  padding: 0.85rem 1rem; display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem;
+  align-items: start; animation: slideIn 0.3s ease;
+}
+@keyframes slideIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+.sentiment-badge {
+  font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 500;
+  padding: 0.2rem 0.5rem; border-radius: 2px; white-space: nowrap;
+}
+.badge-positive { background: rgba(0,229,160,0.12); color: var(--pos); }
+.badge-negative { background: rgba(255,77,109,0.12); color: var(--neg); }
+.badge-neutral  { background: rgba(123,147,255,0.12); color: var(--neu); }
+.feed-text { font-size: 0.75rem; line-height: 1.6; }
+.feed-meta { font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
+.topic-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
+.topic-tag { font-size: 0.55rem; padding: 0.15rem 0.4rem; border: 1px solid var(--border); border-radius: 2px; color: var(--muted); }
+.empty-state { color: var(--muted); font-size: 0.75rem; text-align: center; padding: 3rem; }
+
+@media (max-width: 768px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Sentiment<span>.</span>AI</div>
+  <div class="ws-status">
+    <div class="dot" id="wsDot"></div>
+    <span id="wsLabel">connecting...</span>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="sidebar">
+    <div>
+      <div class="panel-title">Analyze Text</div>
+      <textarea id="textInput" placeholder="Type or paste text to analyze..."></textarea>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="analyzeText()">Analyze</button>
+        <button class="btn btn-ghost" onclick="startDemo()">Demo</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-title">Upload CSV (one text per line)</div>
+      <input type="file" id="csvFile" accept=".csv,.txt" style="display:none" onchange="uploadCSV(this)">
+      <button class="btn btn-ghost" onclick="document.getElementById('csvFile').click()">Choose File</button>
+    </div>
+
+    <div>
+      <div class="panel-title">Live Stats</div>
+      <div class="stats-grid">
+        <div class="stat-box"><div class="num pos-color" id="posCount">0</div><div class="lbl">Positive</div></div>
+        <div class="stat-box"><div class="num neg-color" id="negCount">0</div><div class="lbl">Negative</div></div>
+        <div class="stat-box"><div class="num neu-color" id="neuCount">0</div><div class="lbl">Neutral</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-title">Sentiment Trend</div>
+      <div class="chart-box">
+        <canvas id="trendChart"></canvas>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-title">Distribution</div>
+      <div class="chart-box">
+        <canvas id="pieChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="panel-title">Live Feed</div>
+    <div class="feed" id="feed">
+      <div class="empty-state" id="emptyState">No data yet. Type text, click Demo, or upload a CSV.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+const WS_URL = API.replace(/^http/, 'ws') + '/ws';
+
+let counts = { positive: 0, negative: 0, neutral: 0 };
+let trendData = [];
+let ws;
+
+// ── Charts ──────────────────────────────────────────────────────────────────
+const trendCtx = document.getElementById('trendChart').getContext('2d');
+const trendChart = new Chart(trendCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'Positive', data: [], borderColor: '#00e5a0', backgroundColor: 'rgba(0,229,160,0.08)', tension: 0.4, fill: true, pointRadius: 2 },
+      { label: 'Negative', data: [], borderColor: '#ff4d6d', backgroundColor: 'rgba(255,77,109,0.08)', tension: 0.4, fill: true, pointRadius: 2 },
+      { label: 'Neutral',  data: [], borderColor: '#7b93ff', backgroundColor: 'rgba(123,147,255,0.08)', tension: 0.4, fill: true, pointRadius: 2 },
+    ]
+  },
+  options: {
+    responsive: true, animation: false,
+    plugins: { legend: { labels: { color: '#4a506e', font: { size: 9 }, boxWidth: 10 } } },
+    scales: {
+      x: { ticks: { color: '#4a506e', font: { size: 8 } }, grid: { color: '#1c1f2e' } },
+      y: { ticks: { color: '#4a506e', font: { size: 8 } }, grid: { color: '#1c1f2e' }, beginAtZero: true }
+    }
+  }
+});
+
+const pieCtx = document.getElementById('pieChart').getContext('2d');
+const pieChart = new Chart(pieCtx, {
+  type: 'doughnut',
+  data: {
+    labels: ['Positive', 'Negative', 'Neutral'],
+    datasets: [{ data: [0, 0, 0], backgroundColor: ['#00e5a0', '#ff4d6d', '#7b93ff'], borderWidth: 0 }]
+  },
+  options: {
+    responsive: true, animation: false,
+    plugins: { legend: { labels: { color: '#4a506e', font: { size: 9 }, boxWidth: 10 } } }
+  }
+});
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => { setWS(true); };
+  ws.onclose = () => { setWS(false); setTimeout(connectWS, 3000); };
+  ws.onmessage = (e) => { handleResult(JSON.parse(e.data)); };
+  ws.onerror = () => ws.close();
+}
+
+function setWS(live) {
+  document.getElementById('wsDot').className = 'dot' + (live ? ' live' : '');
+  document.getElementById('wsLabel').textContent = live ? 'live' : 'reconnecting...';
+}
+
+// ── Result handler ───────────────────────────────────────────────────────────
+function handleResult(r) {
+  document.getElementById('emptyState')?.remove();
+  counts[r.sentiment]++;
+  updateStats();
+  updateCharts(r);
+  addFeedItem(r);
+}
+
+function updateStats() {
+  document.getElementById('posCount').textContent = counts.positive;
+  document.getElementById('negCount').textContent = counts.negative;
+  document.getElementById('neuCount').textContent = counts.neutral;
+}
+
+function updateCharts(r) {
+  const label = new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  trendChart.data.datasets[0].data.push(counts.positive);
+  trendChart.data.datasets[1].data.push(counts.negative);
+  trendChart.data.datasets[2].data.push(counts.neutral);
+  if (trendChart.data.labels.length > 20) {
+    trendChart.data.labels.shift();
+    trendChart.data.datasets.forEach(d => d.data.shift());
+  }
+  trendChart.update();
+  pieChart.data.datasets[0].data = [counts.positive, counts.negative, counts.neutral];
+  pieChart.update();
+}
+
+function addFeedItem(r) {
+  const feed = document.getElementById('feed');
+  const badges = { positive: 'badge-positive', negative: 'badge-negative', neutral: 'badge-neutral' };
+  const topicHtml = r.topics.map(t => `<span class="topic-tag">${t}</span>`).join('');
+  const div = document.createElement('div');
+  div.className = 'feed-item';
+  div.innerHTML = `
+    <span class="sentiment-badge ${badges[r.sentiment]}">${r.sentiment}</span>
+    <div>
+      <div class="feed-text">${r.text}</div>
+      <div class="topic-tags">${topicHtml}</div>
+    </div>
+    <div class="feed-meta">${r.score.toFixed(2)}<br>${r.latency_ms}ms</div>
+  `;
+  feed.prepend(div);
+  if (feed.children.length > 50) feed.lastChild.remove();
+}
+
+// ── Actions ──────────────────────────────────────────────────────────────────
+async function analyzeText() {
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) return;
+  await fetch(`${API}/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  document.getElementById('textInput').value = '';
+}
+
+async function startDemo() {
+  await fetch(`${API}/demo/start`);
+}
+
+async function uploadCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  await fetch(`${API}/upload`, { method: 'POST', body: fd });
+  input.value = '';
+}
+
+// ── Enter key ────────────────────────────────────────────────────────────────
+document.getElementById('textInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); analyzeText(); }
+});
+
+connectWS();
+</script>
+</body>
+</html>
