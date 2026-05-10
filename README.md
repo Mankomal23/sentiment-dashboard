@@ -1,6 +1,6 @@
 ---
 title: Sentiment Dashboard
-emoji: U+1F9E0
+emoji: 🧠
 colorFrom: green
 colorTo: blue
 sdk: docker
